@@ -2,6 +2,7 @@ from .internal.selftest import SelfTestApplet
 from .internal.benchmark import BenchmarkApplet
 
 from .interface.uart import UARTApplet
+from .interface.microwire_master import MicrowireMasterApplet
 from .interface.spi_master import SPIMasterApplet
 from .interface.i2c_master import I2CMasterApplet
 from .interface.jtag_pinout import JTAGPinoutApplet
