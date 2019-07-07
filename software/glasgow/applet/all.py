@@ -11,6 +11,7 @@ from .interface.jtag_svf import JTAGSVFApplet
 
 from .memory._24x import Memory24xApplet
 from .memory._25x import Memory25xApplet
+from .memory._93x import Memory93xApplet
 from .memory.onfi import MemoryONFIApplet
 from .memory.floppy import MemoryFloppyApplet
 
