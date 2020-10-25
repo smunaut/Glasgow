@@ -93,14 +93,14 @@ class MSP430DebugInterface(aobject):
         if self._family == "124":
             cntrl_sig = self._DR_CNTRL_SIG(R_W=1, TAGFUNCSAT=1, TCE1=1)
         elif self._family == "56":
-            raise NotImplementedError # FIXME
+            cntrl_sig = self._DR_CNTRL_SIG(R_W=1, TCE1=1, CPUSUSP=1)
         else:
             assert False
         for arg, value in kwargs.items():
             setattr(cntrl_sig, arg, value)
         cntrl_sig_bits = cntrl_sig.to_bits()
-        self._log("write CNTRL_SIG %s", cntrl_sig.bits_repr(omit_zero=True),
-                  level=logging.TRACE)
+        self._log("write CNTRL_SIG %04x %s", cntrl_sig.to_int(), cntrl_sig.bits_repr(omit_zero=True),
+                  level=logging.INFO)
         await self.lower.write_ir(IR_CNTRL_SIG_16BIT)
         await self.lower.write_dr(cntrl_sig_bits.reversed())
 
@@ -108,8 +108,8 @@ class MSP430DebugInterface(aobject):
         await self.lower.write_ir(IR_CNTRL_SIG_CAPTURE)
         cntrl_sig_bits = await self.lower.read_dr(16)
         cntrl_sig = self._DR_CNTRL_SIG.from_bits(cntrl_sig_bits.reversed())
-        self._log("read CNTRL_SIG %s", cntrl_sig.bits_repr(omit_zero=True),
-                  level=logging.TRACE)
+        self._log("read CNTRL_SIG %04x %s", cntrl_sig.to_int(), cntrl_sig.bits_repr(omit_zero=True),
+                  level=logging.INFO)
         return cntrl_sig
 
     @property
@@ -210,12 +210,23 @@ class MSP430DebugInterface(aobject):
             await self._write_control(TCE1=1)
         elif self._family == "56":
             # Reference function: GetDevice_430Xv2
-            raise NotImplementedError # FIXME
+            await self._write_control(TCE1=1, RELEASE_LBYTE=1)
         else:
             assert False
         cntrl_sig = await self._read_control()
         if not cntrl_sig.TCE:
             raise MSP430DebugError("cannot stop target")
+        if self._family == "56":
+            await self.lower.set_tclk(0)
+            await self.lower.set_tclk(1)
+            await self._write_control(POR=1, CPUSUSP=0)
+            await self._write_control(POR=0, CPUSUSP=0)
+            for i in range(5):
+                await self.lower.set_tclk(0)
+                await self.lower.set_tclk(1)
+            await self._write_control()
+            await self.lower.set_tclk(0)
+            await self.lower.set_tclk(1)
         if self.device_id is None:
             # And now we can determine which specific device it is.
             if self._family == "124":
@@ -290,7 +301,22 @@ class MSP430DebugInterface(aobject):
             await self._release_bus()
         elif self._family == "56":
             # Reference function: ReadMem_430Xv2
-            raise NotImplementedError # FIXME
+            await self.lower.set_tclk(0)
+            await self._write_control(RELEASE_LBYTE=2, TCE1=1, CPUSUSP=0, WAIT=1, R_W=1)
+            offset = 0
+            while offset < length:
+                await self.lower.write_ir(IR_ADDR_16BIT)
+                await self._write_address_dr(address + offset)
+                await self.lower.write_ir(IR_DATA_TO_ADDR)
+                await self.lower.set_tclk(1)
+                await self.lower.set_tclk(0)
+                data_word = await self._read_data_dr()
+                self._log("read memory [%#07x]=%#06x", address + offset, data_word)
+                data   += struct.pack("<H", data_word)
+                offset += 2
+            await self.lower.set_tclk(1)
+            await self.lower.set_tclk(0)
+            await self.lower.set_tclk(1)
         else:
             assert False
         return data
@@ -328,6 +354,11 @@ class DebugMSP430AppletMixin:
 
     async def interact(self, device, args, msp430_iface):
         await msp430_iface.target_stop()
+        self.logger.info("attached to target %#06x", msp430_iface.device_id)
+
+        x = await msp430_iface.target_read_memory(0xc000, 16*1024)
+        open('/tmp/dump.bin', 'wb').write(x)
+
         await msp430_iface.target_detach(reset=True)
 
 
